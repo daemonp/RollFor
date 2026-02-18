@@ -16,8 +16,9 @@ local lib_stub = LibStub
 ---@param loot_tracker LootTracker
 ---@param version table
 ---@param get_raid_id fun(): string?
+---@param roster_tracker RosterTracker?
 ---@return LootExport
-function M.new( loot_tracker, version, get_raid_id )
+function M.new( loot_tracker, version, get_raid_id, roster_tracker )
   -- Items are keyed by item_link, which is unique per drop instance in WoW
   -- (even for duplicate drops like 2x tier tokens). Winner/award events receive
   -- the actual drop's item_link from winner_tracker/loot callback, not a
@@ -110,35 +111,98 @@ function M.new( loot_tracker, version, get_raid_id )
     return items, item_order
   end
 
-  local function get_data()
-    local events = loot_tracker.get_events()
-    if getn( events ) == 0 then return nil end
+  local function build_attendance()
+    if not roster_tracker then return nil end
 
-    local items, item_order = build_loot_table( events )
-    local loot = {}
+    local roster_events = roster_tracker.get_events()
+    local signups = roster_tracker.get_signups()
 
-    for i = 1, getn( item_order ) do
-      local key = item_order[ i ]
-      local item = items[ key ]
+    if getn( roster_events ) == 0 and getn( signups ) == 0 then return nil end
 
-      if item.original_winner then
-        local entry = {
-          item_id = item.item_id,
-          item_name = item.item_name,
-          quality = item.quality,
-          original_winner = item.original_winner,
-          final_recipient = item.final_recipient or {
-            name = item.original_winner.name,
-            class = item.original_winner.class
-          },
-          traded = item.traded or false
-        }
+    local snapshots = {}
+    local events = {}
 
-        table.insert( loot, entry )
+    for i = 1, getn( roster_events ) do
+      local event = roster_events[ i ]
+      if not event then break end
+
+      if event.type == "snapshot" then
+        table.insert( snapshots, {
+          timestamp = event.timestamp,
+          trigger = event.trigger,
+          players = event.players
+        } )
+      elseif event.type == "join" then
+        table.insert( events, {
+          type = "join",
+          timestamp = event.timestamp,
+          name = event.player_name,
+          class = event.player_class
+        } )
+      elseif event.type == "leave" then
+        table.insert( events, {
+          type = "leave",
+          timestamp = event.timestamp,
+          name = event.player_name,
+          class = event.player_class,
+          reason = event.reason
+        } )
       end
     end
 
+    local soft_res_signups = {}
+    for i = 1, getn( signups ) do
+      local signup = signups[ i ]
+      if not signup then break end
+      table.insert( soft_res_signups, {
+        name = signup.name,
+        items = signup.items
+      } )
+    end
+
     return {
+      snapshots = snapshots,
+      events = events,
+      soft_res_signups = soft_res_signups
+    }
+  end
+
+  local function get_data()
+    local loot_events = loot_tracker.get_events()
+    local attendance = build_attendance()
+    local has_loot = getn( loot_events ) > 0
+    local has_attendance = attendance ~= nil
+
+    if not has_loot and not has_attendance then return nil end
+
+    local loot = {}
+
+    if has_loot then
+      local items, item_order = build_loot_table( loot_events )
+
+      for i = 1, getn( item_order ) do
+        local key = item_order[ i ]
+        local item = items[ key ]
+
+        if item.original_winner then
+          local entry = {
+            item_id = item.item_id,
+            item_name = item.item_name,
+            quality = item.quality,
+            original_winner = item.original_winner,
+            final_recipient = item.final_recipient or {
+              name = item.original_winner.name,
+              class = item.original_winner.class
+            },
+            traded = item.traded or false
+          }
+
+          table.insert( loot, entry )
+        end
+      end
+    end
+
+    local result = {
       metadata = {
         id = get_raid_id(),
         addon_version = version.str,
@@ -147,6 +211,12 @@ function M.new( loot_tracker, version, get_raid_id )
       },
       loot = loot
     }
+
+    if has_attendance then
+      result.attendance = attendance
+    end
+
+    return result
   end
 
   local function export()

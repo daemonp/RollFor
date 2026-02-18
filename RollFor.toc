@@ -37,6 +37,7 @@ src\SoftResMatchedNameDecorator.lua
 src\AwardedLoot.lua
 src\LootTracker.lua
 src\GroupRoster.lua
+src\RosterTracker.lua
 src\NameAutoMatcher.lua
 src\NameManualMatcher.lua
 src\NameMatchReport.lua

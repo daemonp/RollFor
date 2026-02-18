@@ -112,6 +112,19 @@ local function trade_complete_callback( recipient_name, items_given, items_recei
   end
 end
 
+local function do_loot_export()
+  if M.roster_tracker then
+    M.roster_tracker.take_snapshot( "export" )
+  end
+  local data = M.loot_export.export()
+  if not data then
+    info( "No loot data to export." )
+    return
+  end
+  M.loot_export_gui.show( data )
+  info( "Loot export data generated. Copy from the window above." )
+end
+
 local function create_components()
   ---@type AceTimer
   M.ace_timer = lib_stub( "AceTimer-3.0" )
@@ -304,8 +317,11 @@ local function create_components()
   ---@type LootTracker
   M.loot_tracker = m.LootTracker.new( db( "loot_tracker" ), M.group_roster )
 
+  ---@type RosterTracker
+  M.roster_tracker = m.RosterTracker.new( db( "roster_tracker" ), M.group_roster )
+
   ---@type LootExport
-  M.loot_export = m.LootExport.new( M.loot_tracker, version, function() return m.raid_id end )
+  M.loot_export = m.LootExport.new( M.loot_tracker, version, function() return m.raid_id end, M.roster_tracker )
 
   ---@type LootExportGui
   M.loot_export_gui = m.LootExportGui.new( M.api )
@@ -360,15 +376,7 @@ local function create_components()
   )
 
   -- TODO: Add type.
-  M.softres_gui = m.SoftResGui.new( M.api, M.import_encoded_softres_data, M.softres_check, M.softres, clear_data, M.dropped_loot_announce.reset, function()
-    local data = M.loot_export.export()
-    if not data then
-      info( "No loot data to export." )
-      return
-    end
-    M.loot_export_gui.show( data )
-    info( "Loot export data generated. Copy from the window above." )
-  end )
+  M.softres_gui = m.SoftResGui.new( M.api, M.import_encoded_softres_data, M.softres_check, M.softres, clear_data, M.dropped_loot_announce.reset, do_loot_export )
 
   -- TODO: Add type.
   M.trade_tracker = m.TradeTracker.new( M.ace_timer, M.chat, trade_complete_callback )
@@ -510,6 +518,8 @@ local function subscribe_for_component_events()
     M.awarded_loot.clear()
     M.dropped_loot.clear()
     M.loot_tracker.clear()
+    M.roster_tracker.clear()
+    M.roster_tracker.take_snapshot( "group_joined" )
   end )
 
   M.config_event_bus.subscribe( "config_change_requires_ui_reload", function()
@@ -520,6 +530,9 @@ end
 function M.import_softres_data( softres_data )
   M.unfiltered_softres.import( softres_data )
   M.name_matcher.auto_match()
+  if M.roster_tracker then
+    M.roster_tracker.record_softres_signups( M.unfiltered_softres )
+  end
 end
 
 function M.import_encoded_softres_data( data, data_loaded_callback )
@@ -912,15 +925,7 @@ local function setup_slash_commands()
 
 
   SLASH_RFE1 = "/rfe"
-  M.api().SlashCmdList[ "RFE" ] = function()
-    local data = M.loot_export.export()
-    if not data then
-      info( "No loot data to export." )
-      return
-    end
-    M.loot_export_gui.show( data )
-    info( "Loot export data generated. Copy from the window above." )
-  end
+  M.api().SlashCmdList[ "RFE" ] = do_loot_export
 
   SLASH_PL1 = "/pl"
   M.api().SlashCmdList[ "PL"] = plus_ones_command
@@ -971,6 +976,9 @@ end
 function M.on_group_changed()
   M.name_matcher.auto_match()
   update_minimap_icon()
+  if M.roster_tracker then
+    M.roster_tracker.on_group_changed()
+  end
 end
 
 function M.on_chat_msg_addon( name, message, _, sender )
