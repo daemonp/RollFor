@@ -35,6 +35,7 @@ src\SoftResAbsentPlayersDecorator.lua
 src\SoftResPresentPlayersDecorator.lua
 src\SoftResMatchedNameDecorator.lua
 src\AwardedLoot.lua
+src\LootTracker.lua
 src\GroupRoster.lua
 src\NameAutoMatcher.lua
 src\NameManualMatcher.lua
@@ -90,6 +91,8 @@ src\ChatApi.lua
 src\Chat.lua
 src\PlayerInfo.lua
 src\LootAwardCallback.lua
+src\LootExport.lua
+src\LootExportGui.lua
 src\LootFacadeListener.lua
 src\LootController.lua
 src\TooltipReader.lua

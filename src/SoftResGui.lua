@@ -31,10 +31,10 @@ local control_backdrop = {
   insets = { left = 3, right = 3, top = 3, bottom = 3 }
 }
 
-local function create_frame( api, on_import, on_clear, on_cancel, on_dirty )
+local function create_frame( api, on_import, on_clear, on_cancel, on_dirty, on_export )
   local frame = m.create_backdrop_frame( api(), "Frame", "RollForSoftResLootFrame", UIParent )
   frame:Hide()
-  frame:SetWidth( 565 )
+  frame:SetWidth( 655 )
   frame:SetHeight( 300 )
   frame:SetPoint( "CENTER", UIParent, "CENTER", 0, 0 )
   frame:EnableMouse()
@@ -128,6 +128,13 @@ local function create_frame( api, on_import, on_clear, on_cancel, on_dirty )
   import_button:SetWidth( 100 )
   import_button:SetText( "Import!" )
 
+  local export_button = api().CreateFrame( "Button", nil, frame, "UIPanelButtonTemplate" )
+  export_button:SetScript( "OnClick", function() on_export() end )
+  export_button:SetPoint( "RIGHT", import_button, "LEFT", -10, 0 )
+  export_button:SetHeight( 20 )
+  export_button:SetWidth( 80 )
+  export_button:SetText( "Export" )
+
   editbox:SetScript( "OnTextChanged", function( _ )
     scroll_frame:UpdateScrollChildRect()
     on_dirty( import_button, clear_button, cancel_button )
@@ -190,7 +197,7 @@ local function create_frame( api, on_import, on_clear, on_cancel, on_dirty )
   return frame
 end
 
-function M.new( api, import_encoded_softres_data, softres_check, softres, clear_data, reset_loot_announcements )
+function M.new( api, import_encoded_softres_data, softres_check, softres, clear_data, reset_loot_announcements, on_export )
   local softres_data
   local edit_box_text
   local dirty = false
@@ -261,7 +268,7 @@ function M.new( api, import_encoded_softres_data, softres_check, softres, clear_
   end
 
   local function toggle()
-    if not frame then frame = create_frame( api, on_import, on_clear, on_cancel, on_dirty ) end
+    if not frame then frame = create_frame( api, on_import, on_clear, on_cancel, on_dirty, on_export ) end
 
     if frame:IsVisible() then
       frame:Hide()

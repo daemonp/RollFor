@@ -18,7 +18,8 @@ local M = m.Module.new( "LootAwardCallback" )
 ---@param softres GroupAwareSoftRes
 ---@param confirm_popup ConfirmPopup
 ---@param config Config
-function M.new( awarded_loot, roll_controller, winner_tracker, group_roster, softres, confirm_popup, config )
+---@param loot_tracker LootTracker?
+function M.new( awarded_loot, roll_controller, winner_tracker, group_roster, softres, confirm_popup, config, loot_tracker )
   ---@param item_id number
   ---@param item_link string
   ---@param player_name string
@@ -56,7 +57,15 @@ function M.new( awarded_loot, roll_controller, winner_tracker, group_roster, sof
         sr_player and sr_player.sr_plus,
         false
       )
-  
+
+    if loot_tracker and not is_trade and not loot_tracker.has_winner( item_link ) then
+      loot_tracker.record_award(
+        player_name, player_class or class, item_id, item_link,
+        roll_data and roll_data.roll_type, rolling_strategy,
+        roll_data and roll_data.roll, sr_player and sr_player.sr_plus
+      )
+    end
+
     if is_trade then return end
 
     if player_class then

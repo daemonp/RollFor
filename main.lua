@@ -52,6 +52,16 @@ local function on_raid_trade( giver_name, recipient_name, item_name )
       info( string.format( "%s traded %s to %s.", hl( giver_name ), item_link, hl( recipient_name ) ) )
       M.awarded_loot.unaward( giver_name, item_id )
     end
+
+    -- on_raid_trade fires for OTHER players' trades (system chat message).
+    -- trade_complete_callback fires for YOUR trades (trade UI). They are mutually exclusive.
+    if M.loot_tracker then
+      M.loot_tracker.record_trade(
+        giver_name,
+        recipient_name,
+        item_id, item_name, quality
+      )
+    end
   end
 end
 
@@ -65,7 +75,15 @@ local function trade_complete_callback( recipient_name, items_given, items_recei
       local item_name = item_id and M.dropped_loot.get_dropped_item_name( item_id )
 
       if item_id and item_name then
-        M.loot_award_callback.on_loot_awarded( item_id, item.link, recipient_name )
+        M.loot_award_callback.on_loot_awarded( item_id, item.link, recipient_name, nil, true )
+        local quality = m.get_item_quality_and_texture( m.api, item_id )
+        if M.loot_tracker then
+          M.loot_tracker.record_trade(
+            M.player_info.get_name(),
+            recipient_name,
+            item_id, item_name, quality
+          )
+        end
       end
     end
   end
@@ -78,6 +96,17 @@ local function trade_complete_callback( recipient_name, items_given, items_recei
 
       if item_id and M.awarded_loot.has_item_been_awarded( recipient_name, item_id ) then
         M.unaward_item( recipient_name, item_id, item.link )
+
+        -- recipient_name is the trade partner (they gave this item to us).
+        if M.loot_tracker then
+          local item_name = M.dropped_loot.get_dropped_item_name( item_id )
+          local quality = m.get_item_quality_and_texture( m.api, item_id )
+          M.loot_tracker.record_trade(
+            recipient_name,
+            M.player_info.get_name(),
+            item_id, item_name, quality
+          )
+        end
       end
     end
   end
@@ -272,8 +301,17 @@ local function create_components()
     M.player_info
   )
 
+  ---@type LootTracker
+  M.loot_tracker = m.LootTracker.new( db( "loot_tracker" ), M.group_roster )
+
+  ---@type LootExport
+  M.loot_export = m.LootExport.new( M.loot_tracker, version, function() return m.raid_id end )
+
+  ---@type LootExportGui
+  M.loot_export_gui = m.LootExportGui.new( M.api )
+
   ---@type LootAwardCallback
-  M.loot_award_callback = m.LootAwardCallback.new( M.awarded_loot, M.roll_controller, M.winner_tracker, M.group_roster, M.softres, M.confirm_popup, M.config)
+  M.loot_award_callback = m.LootAwardCallback.new( M.awarded_loot, M.roll_controller, M.winner_tracker, M.group_roster, M.softres, M.confirm_popup, M.config, M.loot_tracker )
   ---@type MasterLoot
   M.master_loot = m.MasterLoot.new(
     M.master_loot_candidates,
@@ -322,7 +360,15 @@ local function create_components()
   )
 
   -- TODO: Add type.
-  M.softres_gui = m.SoftResGui.new( M.api, M.import_encoded_softres_data, M.softres_check, M.softres, clear_data, M.dropped_loot_announce.reset )
+  M.softres_gui = m.SoftResGui.new( M.api, M.import_encoded_softres_data, M.softres_check, M.softres, clear_data, M.dropped_loot_announce.reset, function()
+    local data = M.loot_export.export()
+    if not data then
+      info( "No loot data to export." )
+      return
+    end
+    M.loot_export_gui.show( data )
+    info( "Loot export data generated. Copy from the window above." )
+  end )
 
   -- TODO: Add type.
   M.trade_tracker = m.TradeTracker.new( M.ace_timer, M.chat, trade_complete_callback )
@@ -443,9 +489,27 @@ local function subscribe_for_component_events()
     end
   end )
 
+  M.winner_tracker.subscribe_for_winner_found(
+    function( winner_name, item_link, winning_roll, roll_type, rolling_strategy )
+      local item_id = M.item_utils.get_item_id( item_link )
+      if not item_id then return end
+
+      local player = M.group_roster.find_player( winner_name )
+      local player_class = player and player.class
+      local sr_players = M.softres.get( item_id )
+      local sr_player = sr_players and m.find( winner_name, sr_players, "name" )
+
+      M.loot_tracker.record_winner(
+        winner_name, player_class, item_id, item_link,
+        roll_type, rolling_strategy, winning_roll,
+        sr_player and sr_player.sr_plus
+      )
+    end )
+
   M.new_group_event.subscribe( function()
     M.awarded_loot.clear()
     M.dropped_loot.clear()
+    M.loot_tracker.clear()
   end )
 
   M.config_event_bus.subscribe( "config_change_requires_ui_reload", function()
@@ -791,6 +855,12 @@ local function plus_ones_command( args )
       M.chat.info("Gave " .. (m.colorize_player_by_class( player.name, player.class ) or m.colors.grey( player.name )) .. " a +1 for " .. item_link )
       local roll_data = { player_name = player.name, player_class = player.class, roll_type = RollType.MainSpec, roll = 0, plus_ones = 0 }
       M.awarded_loot.award( player.name, item_id, roll_data, RollingStrategy.NormalRoll, item_link, player.class, nil, true)
+      if not M.loot_tracker.has_winner( item_link ) then
+        M.loot_tracker.record_award(
+          player.name, player.class, item_id, item_link,
+          RollType.MainSpec, RollingStrategy.NormalRoll, 0
+        )
+      end
     elseif action == "rm" or action == "remove" then
       if M.awarded_loot.has_item_been_awarded( player.name, item_id ) then
         M.unaward_item( player.name, item_id, item_link )
@@ -840,6 +910,17 @@ local function setup_slash_commands()
   SLASH_RFT1 = "/rft"
   M.api().SlashCmdList[ "RFT" ] = M.sandbox.run
 
+
+  SLASH_RFE1 = "/rfe"
+  M.api().SlashCmdList[ "RFE" ] = function()
+    local data = M.loot_export.export()
+    if not data then
+      info( "No loot data to export." )
+      return
+    end
+    M.loot_export_gui.show( data )
+    info( "Loot export data generated. Copy from the window above." )
+  end
 
   SLASH_PL1 = "/pl"
   M.api().SlashCmdList[ "PL"] = plus_ones_command
